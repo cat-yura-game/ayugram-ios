@@ -319,13 +319,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
     private let phoneAndCountryNode: PhoneAndCountryNode
     private let contactSyncNode: ContactSyncNode
     private let proceedNode: SolidRoundedButtonNode
-    // AYG: "Log in with a session code" — see `AYGSessionTransfer.swift`. Visible
-    // rather than hidden behind a gesture like the `debugQrTap` above it: a reviewer
-    // has to find this without being told where to tap, and an undocumented
-    // input that changes behaviour is what App Review guideline 2.3.1 is about.
-    private let aygImportSessionNode: HighlightableButtonNode
-    var aygImportSessionPressed: (() -> Void)?
-    
     private var qrNode: ASImageNode?
     private let exportTokenDisposable = MetaDisposable()
     private let tokenEventsDisposable = MetaDisposable()
@@ -435,9 +428,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
         self.proceedNode.isEnabled = false
         self.proceedNode.accessibilityIdentifier = "Auth.PhoneEntry.ContinueButton"
 
-        self.aygImportSessionNode = HighlightableButtonNode()
-        self.aygImportSessionNode.setTitle(aygSessionImportButtonTitle, with: Font.regular(16.0), with: theme.list.itemAccentColor, for: [])
-
         super.init()
         
         self.setViewBlock({
@@ -453,7 +443,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
         self.addSubnode(self.phoneAndCountryNode)
         self.addSubnode(self.contactSyncNode)
         self.addSubnode(self.proceedNode)
-        self.addSubnode(self.aygImportSessionNode)
         self.addSubnode(self.animationNode)
         self.addSubnode(self.managedAnimationNode)
         self.contactSyncNode.isHidden = true
@@ -497,8 +486,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
             }))
         }
         
-        self.aygImportSessionNode.addTarget(self, action: #selector(self.aygImportSessionTap), forControlEvents: .touchUpInside)
-
         self.proceedNode.pressed = { [weak self] in
             self?.checkPhone?()
         }
@@ -669,14 +656,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
         }
         
         transition.updateFrame(node: self.proceedNode, frame: buttonFrame)
-
-        // AYG: sits above Continue rather than below it — Continue is pinned to the
-        // bottom inset, so anything under it would be off-screen once the keyboard is up.
-        let aygImportSize = self.aygImportSessionNode.measure(CGSize(width: layout.size.width, height: 44.0))
-        transition.updateFrame(node: self.aygImportSessionNode, frame: CGRect(
-            origin: CGPoint(x: floorToScreenPixels((layout.size.width - aygImportSize.width) / 2.0), y: buttonFrame.minY - 12.0 - aygImportSize.height),
-            size: aygImportSize
-        ))
         
         self.animationNode.updateLayout(size: animationSize)
         
@@ -720,10 +699,6 @@ final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
         }
     }
     
-    @objc private func aygImportSessionTap() {
-        self.aygImportSessionPressed?()
-    }
-
     @objc private func debugQrTap(_ recognizer: UITapGestureRecognizer) {
         if self.qrNode == nil {
             let qrNode = ASImageNode()

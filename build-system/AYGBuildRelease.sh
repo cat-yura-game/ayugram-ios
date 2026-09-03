@@ -62,7 +62,11 @@ python3 build-system/Make/Make.py --overrideXcodeVersion \
     --buildNumber="$BUILD_NUMBER" --configuration=release_arm64 \
     "$@" 2>&1 | tee "$LOG"
 
-status=${pipestatus[1]:-${PIPESTATUS[1]}}
+# Make.py's exit status, not tee's. `pipestatus` is zsh (1-based, so [1] is the
+# first command); `PIPESTATUS` is bash (0-based, so [0] is). Reading PIPESTATUS[1]
+# under bash gives tee's status, which is always 0 — the script then reported
+# BUILD OK for a build that had failed.
+status=${pipestatus[1]:-${PIPESTATUS[0]}}
 echo
 if [ "$status" = "0" ]; then
     echo "BUILD OK — bazel-bin/Telegram/Telegram.ipa"

@@ -76,8 +76,6 @@ private enum DebugControllerEntry: ItemListNodeEntry {
     case crashOnSlowQueries(PresentationTheme, Bool)
     case crashOnMemoryPressure(PresentationTheme, Bool)
     case clearTips(PresentationTheme)
-    // AYG: hands out this account's session as a single line, for App Review.
-    case aygExportSessionCode
     case resetNotifications
     case crash(PresentationTheme)
     case fillLocalSavedMessageCache
@@ -139,8 +137,6 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return DebugControllerSection.web.rawValue
         case .keepChatNavigationStack, .skipReadHistory, .alwaysDisplayTyping, .debugRatingLayout, .crashOnSlowQueries, .crashOnMemoryPressure:
             return DebugControllerSection.experiments.rawValue
-        case .aygExportSessionCode:
-            return DebugControllerSection.experiments.rawValue
         case .clearTips, .resetNotifications, .crash, .fillLocalSavedMessageCache, .resetDatabase, .resetDatabaseAndCache, .resetHoles, .resetTagHoles, .reindexUnread, .resetCacheIndex, .reindexCache, .resetBiometricsData, .optimizeDatabase, .photoPreview, .knockoutWallpaper, .compressedEmojiCache, .storiesJpegExperiment, .checkSerializedData, .enableQuickReactionSwitch, .experimentalCompatibility, .enableDebugDataDisplay, .fakeGlass, .forceClearGlass, .debugRipple, .debugRichText, .browserExperiment, .allForumsHaveTabs, .enableReactionOverrides, .restorePurchases, .disableReloginTokens, .liveStreamV2, .experimentalCallMute, .playerV2, .devRequests, .enableUpdates, .pwa, .enableLocalTranslation:
             return DebugControllerSection.experiments.rawValue
         case .logTranslationRecognition, .resetTranslationStates:
@@ -200,8 +196,6 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return 21
         case .clearTips:
             return 22
-        case .aygExportSessionCode:
-            return 1000
         case .resetNotifications:
             return 23
         case .crash:
@@ -1011,26 +1005,6 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     return settings
                 }).start()
             })
-        case .aygExportSessionCode:
-            // AYG: deliberately here and not in a user-facing screen. The code it
-            // produces is a complete credential for this account — the counterpart
-            // import sits on the login screen because a reviewer has to reach it
-            // before signing in, but producing one should take intent.
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "AyuGram: Copy Session Code", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
-                guard let context = arguments.context else {
-                    return
-                }
-                let _ = (aygSessionCode(postbox: context.account.postbox)
-                |> deliverOnMainQueue).start(next: { code in
-                    let presentationData = arguments.sharedContext.currentPresentationData.with { $0 }
-                    guard let code else {
-                        arguments.presentController(textAlertController(context: context, title: nil, text: "This account has no exportable session.", actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
-                        return
-                    }
-                    UIPasteboard.general.string = code
-                    arguments.presentController(textAlertController(context: context, title: "Session code copied", text: "Anyone holding this code is signed in as this account. Put it in App Review Notes only, and terminate the session afterwards.", actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
-                })
-            })
         case .clearTips:
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Clear Tips", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: {
                 let _ = (arguments.sharedContext.accountManager.transaction { transaction -> Void in
@@ -1677,9 +1651,6 @@ private func debugControllerEntries(context: AccountContext?, sharedContext: Sha
     }
     entries.append(.versionInfo(presentationData.theme))
     // AYG: last, and with the highest `stableId` — `ItemListNodeState` asserts that
-    // entries arrive sorted by it, which is what crashed the screen when this sat in
-    // the middle of the list.
-    entries.append(.aygExportSessionCode)
     
     return entries
 }

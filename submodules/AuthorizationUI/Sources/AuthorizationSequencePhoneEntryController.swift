@@ -150,19 +150,6 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
             strongSelf.view.endEditing(true)
             self?.present(debugController(sharedContext: strongSelf.sharedContext, context: nil, modal: true), in: .window(.root), with: ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
         }, hasOtherAccounts: self.otherAccountPhoneNumbers.0 != nil)
-        // AYG: the visible way in for a session code — see `AYGSessionImport.swift`.
-        self.controllerNode.aygImportSessionPressed = { [weak self] in
-            guard let strongSelf = self else {
-                return
-            }
-            strongSelf.view.endEditing(true)
-            aygPresentSessionImport(
-                from: strongSelf,
-                sharedContext: strongSelf.sharedContext,
-                isTestingEnvironment: strongSelf.isTestingEnvironment,
-                presentationData: strongSelf.presentationData
-            )
-        }
         self.controllerNode.accountUpdated = { [weak self] account in
             guard let strongSelf = self else {
                 return

@@ -521,9 +521,19 @@ private struct NotificationContent: CustomStringConvertible {
     var senderImage: INImage?
     
     var isLockedMessage: String?
-    
-    init(isLockedMessage: String?) {
+
+    // AYG: Swiftgram empty-notifications fix, always on. Service pushes (read on
+    // another device, deleted messages, read reactions/stories, muted chats, logout)
+    // arrive as alert-bearing pushes, and returning an empty UNNotificationContent
+    // does NOT suppress those on current iOS — the server's "You have a new message"
+    // fallback leaks through. Tagged content instead renders as a passive banner with
+    // threadIdentifier "empty-notification", which NotificationService then actively
+    // removes from Notification Center (removeEmptyNotifications*).
+    var isEmpty: Bool
+
+    init(isLockedMessage: String?, isEmpty: Bool = false) {
         self.isLockedMessage = isLockedMessage
+        self.isEmpty = isEmpty
     }
 
     var description: String {
@@ -697,6 +707,16 @@ private struct NotificationContent: CustomStringConvertible {
                 } catch let e {
                     print("Exception: \(e)")
                 }
+            }
+        }
+
+        // AYG: Swiftgram empty-notifications fix — see NotificationContent.isEmpty.
+        if self.isEmpty {
+            content.title = " "
+            content.threadIdentifier = "empty-notification"
+            if #available(iOSApplicationExtension 15.0, iOS 15.0, *) {
+                content.interruptionLevel = .passive
+                content.relevanceScore = 0.0
             }
         }
 
@@ -1101,7 +1121,8 @@ private final class NotificationServiceHandler {
                             action = .logout
                         case "MESSAGE_MUTED":
                             if let peerId = peerId {
-                                action = .poll(peerId: peerId, content: NotificationContent(isLockedMessage: nil), messageId: nil, reportDelivery: false, enableInlineEmoji: false)
+                                // AYG: empty-notifications fix — muted push shows no banner
+                                action = .poll(peerId: peerId, content: NotificationContent(isLockedMessage: nil, isEmpty: true), messageId: nil, reportDelivery: false, enableInlineEmoji: false)
                             }
                         case "MESSAGE_DELETED":
                             if let peerId = peerId {
@@ -1429,7 +1450,8 @@ private final class NotificationServiceHandler {
                         case .logout:
                             Logger.shared.log("NotificationService \(episode)", "Will logout")
 
-                            let content = NotificationContent(isLockedMessage: nil)
+                            // AYG: empty-notifications fix
+                            let content = NotificationContent(isLockedMessage: nil, isEmpty: true)
                             updateCurrentContent(content)
                             completed()
                         case let .poll(peerId, initialContent, messageId, reportDelivery, enableInlineEmoji):
@@ -2065,7 +2087,8 @@ private final class NotificationServiceHandler {
 
                                     queue.async {
                                         guard let strongSelf = self, let stateManager = strongSelf.stateManager else {
-                                            let content = NotificationContent(isLockedMessage: isLockedMessage)
+                                            // AYG: empty-notifications fix
+                                            let content = NotificationContent(isLockedMessage: isLockedMessage, isEmpty: true)
                                             updateCurrentContent(content)
                                             completed()
                                             return
@@ -2357,7 +2380,8 @@ private final class NotificationServiceHandler {
                                             postbox: stateManager.postbox
                                         )
                                         |> deliverOn(strongSelf.queue)).start(next: { value in
-                                            var content = NotificationContent(isLockedMessage: nil)
+                                            // AYG: empty-notifications fix
+                                            var content = NotificationContent(isLockedMessage: nil, isEmpty: true)
                                             if isCurrentAccount {
                                                 content.badge = Int(value.0)
                                             }
@@ -2399,7 +2423,8 @@ private final class NotificationServiceHandler {
                                 }
                                 
                                 let completeRemoval: () -> Void = {
-                                    let content = NotificationContent(isLockedMessage: nil)
+                                    // AYG: empty-notifications fix
+                                    let content = NotificationContent(isLockedMessage: nil, isEmpty: true)
                                     Logger.shared.log("NotificationService \(episode)", "Updating content to \(content)")
                                     
                                     updateCurrentContent(content)
@@ -2451,7 +2476,8 @@ private final class NotificationServiceHandler {
                                             postbox: stateManager.postbox
                                         )
                                         |> deliverOn(strongSelf.queue)).start(next: { value in
-                                            var content = NotificationContent(isLockedMessage: nil)
+                                            // AYG: empty-notifications fix
+                                            var content = NotificationContent(isLockedMessage: nil, isEmpty: true)
                                             if isCurrentAccount {
                                                 content.badge = Int(value.0)
                                             }
@@ -2492,9 +2518,10 @@ private final class NotificationServiceHandler {
                                     }
 
                                     let completeRemoval: () -> Void = {
-                                        let content = NotificationContent(isLockedMessage: nil)
+                                        // AYG: empty-notifications fix
+                                        let content = NotificationContent(isLockedMessage: nil, isEmpty: true)
                                         updateCurrentContent(content)
-                                        
+
                                         completed()
                                     }
 
@@ -2545,11 +2572,67 @@ final class NotificationService: UNNotificationServiceExtension {
     private let content = Atomic<NotificationContent?>(value: nil)
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var episode: String?
-    
+
+    // AYG: Swiftgram empty-notifications fix — see NotificationContent.isEmpty.
+    private var emptyNotificationsRemoved: Bool = false
+    private var notificationRemovalTries: Int32 = 0
+    private let maxNotificationRemovalTries: Int32 = 30
+
     override init() {
         super.init()
     }
-    
+
+    // AYG: Swiftgram empty-notifications fix — sweep previously delivered
+    // "empty-notification" banners once per handled push.
+    func removeEmptyNotificationsOnce() {
+        var emptyNotifications: [String] = []
+        UNUserNotificationCenter.current().getDeliveredNotifications(completionHandler: { notifications in
+            for notification in notifications {
+                if notification.request.content.threadIdentifier == "empty-notification" {
+                    emptyNotifications.append(notification.request.identifier)
+                }
+            }
+            if !emptyNotifications.isEmpty {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: emptyNotifications)
+                #if DEBUG
+                NSLog("Empty notifications removed once. Count \(emptyNotifications.count)")
+                #endif
+            }
+        })
+    }
+
+    // AYG: Swiftgram empty-notifications fix — the just-delivered banner may not be
+    // in the delivered list yet, so retry until it shows up (bounded).
+    func removeEmptyNotifications() {
+        self.notificationRemovalTries += 1
+        if self.emptyNotificationsRemoved || self.notificationRemovalTries > self.maxNotificationRemovalTries {
+            #if DEBUG
+            NSLog("Notification removal try rejected \(self.notificationRemovalTries)")
+            #endif
+            return
+        }
+        var emptyNotifications: [String] = []
+        #if DEBUG
+        NSLog("Notification removal try \(notificationRemovalTries)")
+        #endif
+        UNUserNotificationCenter.current().getDeliveredNotifications(completionHandler: { notifications in
+            for notification in notifications {
+                if notification.request.content.threadIdentifier == "empty-notification" {
+                    emptyNotifications.append(notification.request.identifier)
+                }
+            }
+            if !emptyNotifications.isEmpty {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: emptyNotifications)
+                self.emptyNotificationsRemoved = true
+                #if DEBUG
+                NSLog("Empty notifications removed on try \(self.notificationRemovalTries). Count \(emptyNotifications.count)")
+                #endif
+            } else {
+                self.removeEmptyNotifications()
+            }
+        })
+    }
+
     override func didReceive(_ request: UNNotificationRequest, withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         let episode = String(UInt32.random(in: 0 ..< UInt32.max), radix: 16)
         self.episode = episode
@@ -2580,7 +2663,12 @@ final class NotificationService: UNNotificationServiceExtension {
                         strongSelf.contentHandler = nil
                         
                         if let content = content.with({ $0 }) {
+                            // AYG: Swiftgram empty-notifications fix
+                            strongSelf.removeEmptyNotificationsOnce()
                             contentHandler(content.generate())
+                            if content.isEmpty {
+                                strongSelf.removeEmptyNotifications()
+                            }
                         } else if let initialContent = strongSelf.initialContent {
                             contentHandler(initialContent)
                         }
