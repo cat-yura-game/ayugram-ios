@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ master ]
@@ -8,11 +11,14 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: macos-26
+    timeout-minutes: 360
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
+          repository: ichmagmaus111/ayugram-ios
+          ref: master
           submodules: 'recursive'
           fetch-depth: '0'
 
@@ -73,37 +79,20 @@ jobs:
           done
           zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: build-${{ env.BUILD_NUMBER }}
-          release_name: Telegram ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          body: |
-            An unsigned build of Telegram for iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          draft: false
-          prerelease: false
+          name: AyuGram-iOS-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+          if-no-files-found: error
 
-      - name: Upload Release IPA
-        id: upload-release-ipa 
-        uses: actions/upload-release-asset@v1
+      - name: Create GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-          asset_name: Telegram.ipa
-          asset_content_type: application/zip
-
-      - name: Upload Release DSYM
-        id: upload-release-dsym 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
-          asset_name: Telegram.DSYMs.zip
-          asset_content_type: application/zip
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "build-${BUILD_NUMBER}-${GITHUB_RUN_NUMBER}" \
+            /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa \
+            /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "AyuGram iOS ${APP_VERSION} (${BUILD_NUMBER})" \
+            --notes "Unsigned AyuGram iOS build. Sign the IPA with SideStore, AltStore, Sideloadly or another signer before installation."
